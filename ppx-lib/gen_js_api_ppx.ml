@@ -2,6 +2,8 @@
 (* See the attached LICENSE file.                                         *)
 (* Copyright 2015 by LexiFi.                                              *)
 
+open Migrate_parsetree
+open Ast_408
 open Location
 open Asttypes
 open Parsetree
@@ -1462,7 +1464,7 @@ and str_of_sg ~global_attrs sg =
   gen_decls ~global_attrs decls
 
 and mapper =
-  let open Ast_mapper in
+  let open Migrate_parsetree.Ast_408.Ast_mapper in
   let super = default_mapper in
 
   let typ self ct =
@@ -1564,18 +1566,29 @@ let standalone () =
   if !out = "" then out := Filename.chop_extension src ^ ".ml";
   let oc = if !out = "-" then stdout else open_out !out in
   let sg =
-    Pparse.parse_interface
-      ~tool_name:"gen_js_iface"
-      src
+    let ch = open_in src in
+    let sg =
+      Migrate_parsetree.Parse.interface Versions.ocaml_current (Lexing.from_channel ch) in
+    close_in ch;
+    let migration =
+      Versions.migrate Versions.ocaml_current Versions.ocaml_408 in
+    migration.copy_signature sg
   in
   let str = str_of_sg ~global_attrs:[] sg in
   ignore (check_loc_mapper.Ast_mapper.signature check_loc_mapper sg);
   let str = clear_attr_mapper.Ast_mapper.structure clear_attr_mapper str in
+  let str =
+    let migration =
+      Versions.migrate Versions.ocaml_408 Versions.ocaml_current in
+    migration.copy_structure str
+  in
   Format.fprintf (Format.formatter_of_out_channel oc) "%a@." Pprintast.structure str;
   if !out <> "-" then close_out oc
 
 
 let mapper =
+  let migration = Versions.migrate Versions.ocaml_408 Versions.ocaml_current in
+  migration.copy_mapper
   { mapper with
     Ast_mapper.structure = (fun _this str ->
       check_loc_mapper.Ast_mapper.structure
